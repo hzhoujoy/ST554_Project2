@@ -4,7 +4,8 @@ from functools import reduce
 from pyspark.sql.types import *
 import pandas as pd
 from pandas.api.types import is_numeric_dtype
-from functools import reduce
+from pyspark.sql.types import StringType
+
 
 class SparkDataCheck:
     """
@@ -13,11 +14,11 @@ class SparkDataCheck:
     #initializaiton and crating the df attribute
     def __init__(self, df: DataFrame):
         self.df = df
-        
+
     def __getattr__(self, name):
-        #Called when attribute 'name' isn't found on SparkDataCheck
+        # Called when attribute 'name' isn't found on SparkDataCheck
         return getattr(self.df, name)
-    
+
     @classmethod
     #creates an instance while reading in a csv file
     def from_spark(cls, spark, file_path: str, format: str, sep, header: bool = True, inferSchema: bool = True):
@@ -83,31 +84,42 @@ class SparkDataCheck:
     def check_string_levels(self, column: str, levels: list, new_column: str = None) -> DataFrame:
         """
         Append a nullable-boolean column indicating whether each non-null value in the
-        string `column` is in `levels`. For nulls, return null in the flag.
+        string column is in levels. For nulls, return null in this column.        
+        - If column is missing: print a message and return the original DataFrame.
+        - If column is not StringType: print a warning and return the original DataFrame.
+        - Otherwise: return a copy with new_column appended.
         """
-        # Attempt to get the schema for the specified column.
-        # If the column does not exist, a KeyError is caught.
-        try:
-            col_schema = self.df.schema[column]
-        except KeyError:
-            print(f"Error: Column '{column}' not found in DataFrame.")
-            return self.df    # Return the original df without modification
-
-        # Check if the column's data type is StringType.
-        # If it's not a string, print a warning and return the original DataFrame.
-        if not isinstance(col_schema.dataType, StringType):
-            print(f"Warning: Column '{column}' is not a string type ({col_schema.dataType}). Returning DataFrame without modification.")
+        # Column existence check
+        if column not in self.df.columns:
+            print(f"Error: Column '{column}' not found in DataFrame. Returning DataFrame without modification.")
             return self.df
 
-        # Create a boolean condition: True if the column's value is in the 'levels' list, False otherwise.
-        # PySpark's .isin() method handles NULLs by returning NULL for the condition.
-        condition = F.col(column).isin(levels)
+        # Type check
+        try:
+            field = next(f for f in self.df.schema.fields if f.name == column)
+        except StopIteration:
+            print(f"Error: Column '{column}' not found in schema. Returning DataFrame without modification.")
+            return self.df
 
-        # If no new column name is provided, generate a default name.
+        if not isinstance(field.dataType, StringType):
+            print(f"Warning: Column '{column}' is not a string type ({field.dataType}). "
+                  f"Returning DataFrame without modification.")
+            return self.df
+
+        # Defensive: empty levels warning
+        if not levels:
+            print(f"Warning: Provided 'levels' is empty; the result will be NULL for NULLs and False otherwise.")
+
+        # Use a set for membership checks (PySpark handles it fine)
+        levels_set = set(str(x) for x in levels)
+
+        # Condition: True if value in levels; False if not; NULL stays NULL.
+        condition = F.col(column).isin(list(levels_set))
+
+        # Default column name
         if new_column is None:
             new_column = f"{column}_in_levels"
 
-        # Add the new boolean column to the DataFrame and return the modified DataFrame.
         return self.df.withColumn(new_column, condition)
 
     #create a method to check missing values
@@ -116,6 +128,11 @@ class SparkDataCheck:
         Create a method that checks if a each value in a column is missing (NULL specifically) and returns
         the dataframe with an appended column of Boolean values.
         """
+        # Column existence check
+        if column not in self.df.columns:
+            print(f"Error: Column '{column}' not found in DataFrame. Returning DataFrame without modification.")
+            return self.df
+
         condition = F.col(column).isNull()
 
         # If no new column name is provided, generate a default name.
@@ -129,11 +146,11 @@ class SparkDataCheck:
     def count_min_max(self, column: str = None, group_by_col: str = None) -> pd.DataFrame:
         """
         Reports min and max of a numeric column (or all numeric columns) as a pandas DataFrame.
-        - If `column` is provided:
+        - If column is provided:
             * must exist and be numeric; else print and return None
-            * compute min/max (grouped if group_by_col)
-        - If `column` is None:
-            * compute min/max for ALL numeric columns (grouped if group_by_col)
+            * report min/max (grouped if group_by_col)
+        - If column is None:
+            * report min/max for ALL numeric columns (grouped if group_by_col)
             * produce NO messages; if no numeric cols, return empty pandas DataFrame
         """
         # Validate grouping column if provided
@@ -172,7 +189,7 @@ class SparkDataCheck:
 
         # No column supplied → all numeric columns
         # This block executes if 'column' was None.
-        num_cols = [f.name for f in self.df.schema.fields if isinstance(f.dataType, numeric_types)]
+        num_cols = [f.name for f in self.df.schema.fields if isinstance(f.dataType, numeric_types) and f.name != '_c0']
         if not num_cols:
             return pd.DataFrame() # if no numeric cols, return empty pandas DataFrame
 
@@ -200,6 +217,7 @@ class SparkDataCheck:
         # sort by group for readability
         merged_pdf = merged_pdf.sort_values(by=[group_by_col]).reset_index(drop=True)
         return merged_pdf
+
     #create a method to report the counts with string columns
     def counts_string(self, col1: str, col2:str = None) -> DataFrame:
         # List to store columns to group by

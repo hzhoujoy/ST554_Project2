@@ -218,12 +218,13 @@ class SparkDataCheck:
         merged_pdf = merged_pdf.sort_values(by=[group_by_col]).reset_index(drop=True)
         return merged_pdf
 
-    #create a method to report the counts with string columns
+    #create a method to report the counts for one or two string columns
     def counts_string(self, col1: str, col2:str = None) -> DataFrame:
         # List to store columns to group by
-        cols_to_group = [col1]
-        if col2 is not None:
-            cols_to_group.append(col2)
+        cols_to_group = []
+        for c in [col1, col2]:
+            if c and c not in cols_to_group:
+                cols_to_group.append(c)
 
         # Check if all specified columns exist and are of StringType
         for col_name in cols_to_group:
@@ -236,7 +237,7 @@ class SparkDataCheck:
 
             # Check if the column is a StringType
             if not isinstance(col_schema.dataType, StringType):
-                print(f"Warning: Column '{col_name}' is not a string type ({col_schema.dataType}). Returning None.")
+                print(f"Warning: Column '{col_name}' is not a string type. Returning None.")
                 return None
 
         # If all checks pass, perform the grouping and counting

@@ -5,6 +5,7 @@ from pyspark.sql.types import *
 import pandas as pd
 from pandas.api.types import is_numeric_dtype
 from pyspark.sql.types import StringType
+from typing import Optional
 
 
 class SparkDataCheck:
@@ -18,14 +19,15 @@ class SparkDataCheck:
     def __getattr__(self, name):
         # Called when attribute 'name' isn't found on SparkDataCheck
         return getattr(self.df, name)
-
+    
+    #create methods for creating a new instance of the class while reading in data
     @classmethod
-    #creates an instance while reading in a csv file
+    #Creates a class instance by loading a dataset into a Spark DataFrame from the given file path and format
     def from_spark(cls, spark, file_path: str, format: str, sep, header: bool = True, inferSchema: bool = True):
         df = spark.read.load(file_path, format=format, header=header, inferSchema=inferSchema, sep=sep)
         return cls(df)
 
-    #create methods for creating a new instance of the class while reading in data
+    #Creates a Spark DataFrame from a pandas DataFrame
     @classmethod
     def from_pandas(cls, spark, pandas_df):
         df = spark.createDataFrame(pandas_df)
@@ -189,7 +191,7 @@ class SparkDataCheck:
 
         # No column supplied → all numeric columns
         # This block executes if 'column' was None.
-        num_cols = [f.name for f in self.df.schema.fields if isinstance(f.dataType, numeric_types) and f.name != '_c0']
+        num_cols = [f.name for f in self.df.schema.fields if isinstance(f.dataType, numeric_types)and f.name != '_c0']
         if not num_cols:
             return pd.DataFrame() # if no numeric cols, return empty pandas DataFrame
 
@@ -219,28 +221,37 @@ class SparkDataCheck:
         return merged_pdf
 
     #create a method to report the counts for one or two string columns
-    def counts_string(self, col1: str, col2:str = None) -> DataFrame:
-        # List to store columns to group by
-        cols_to_group = []
-        for c in [col1, col2]:
-            if c and c not in cols_to_group:
-                cols_to_group.append(c)
+    def counts_string(self, col1: str, col2: Optional[str] = None) -> Optional[DataFrame]:
+        #create a list of cloumns to check
+        cols_to_check = [col1]         #initially contains just col1
+        if col2 is not None and col2 !='':
+            cols_to_check.append(col2)  #if the col2 is provided and valid, go inside the clock
+        #Initializes an empty list to store the names of columns that pass your “string check” later in the code.
+        valid_string_cols = []
 
-        # Check if all specified columns exist and are of StringType
-        for col_name in cols_to_group:
+        for c in cols_to_check:
             # Check if the column exists
-            try:
-                col_schema = self.df.schema[col_name]
-            except KeyError:
-                print(f"Error: Column '{col_name}' not found in DataFrame.")
-                return None
+            if c not in self.df.columns:
+                print(f"Error: Column '{c}' not found in DataFrame. This column will be ignored.")
+                continue # Skip to the next column
 
             # Check if the column is a StringType
-            if not isinstance(col_schema.dataType, StringType):
-                print(f"Warning: Column '{col_name}' is not a string type. Returning None.")
-                return None
+            col_schema = self.df.schema[c]
+            if isinstance(col_schema.dataType, StringType):
+                valid_string_cols.append(c)
+            else:
+                print(f"Warning: Column '{c}' is not a string type. This column will be ignored.")
+                continue # Skip to the next column
 
-        # If all checks pass, perform the grouping and counting
-        count_df = self.df.groupBy(*cols_to_group).count()
+        # 3) Decision logic based on how many string columns passed
+        if len(valid_string_cols) == 0:
+            # Both (or the single provided) failed the string check
+            if len(cols_to_check) == 2:
+                print("Both columns are not strings.")
+            else:
+                print(f"Column '{col1}' is not a string.")
+            return None
+
+        # If at least one passed, compute the counts for the passed one(s)
+        count_df = self.df.groupBy(*valid_string_cols).count()
         return count_df
-          

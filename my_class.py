@@ -46,18 +46,18 @@ class SparkDataCheck:
             col_schema = self.df.schema[column]
         except KeyError:
             print(f"Error: Column '{column}' not found in DataFrame.")
-            return self.df
+            return self
 
         # Check if the column is numeric
         numeric_types = (DoubleType, IntegerType, LongType, FloatType)
         if not isinstance(col_schema.dataType, numeric_types):
             print(f"Warning: Column '{column}' is not a numeric type ({col_schema.dataType}). Returning DataFrame without modification.")
-            return self.df
+            return self
 
         # Check that at least one bound is provided
         if lower is None and upper is None:
             print("Error: At least one of 'lower' or 'upper' must be provided.")
-            return self.df
+            return self
 
         column_to_check = F.col(column)  #dynamic column reference
         condition = F.lit(True)          #Initialize a boolean column that is always True
@@ -80,8 +80,9 @@ class SparkDataCheck:
             parts.extend([str(val) for val in [lower, upper] if val is not None])
             new_column = "_".join(parts).replace('.', '_point_') # Handle floats in name
 
-        return self.df.withColumn(new_column, condition)
-
+        self.df = self.df.withColumn(new_column, condition)
+        return self
+    
     #create boolean column to check string levels
     def check_string_levels(self, column: str, levels: list, new_column: str = None) -> DataFrame:
         """
@@ -94,19 +95,19 @@ class SparkDataCheck:
         # Column existence check
         if column not in self.df.columns:
             print(f"Error: Column '{column}' not found in DataFrame. Returning DataFrame without modification.")
-            return self.df
+            return self
 
         # Type check
         try:
             field = next(f for f in self.df.schema.fields if f.name == column)
         except StopIteration:
             print(f"Error: Column '{column}' not found in schema. Returning DataFrame without modification.")
-            return self.df
+            return self
 
         if not isinstance(field.dataType, StringType):
             print(f"Warning: Column '{column}' is not a string type ({field.dataType}). "
                   f"Returning DataFrame without modification.")
-            return self.df
+            return self
 
         # Defensive: empty levels warning
         if not levels:
@@ -122,8 +123,9 @@ class SparkDataCheck:
         if new_column is None:
             new_column = f"{column}_in_levels"
 
-        return self.df.withColumn(new_column, condition)
-
+        self.df = self.df.withColumn(new_column, condition)
+        return self
+    
     #create a method to check missing values
     def check_missing(self, column: str, new_column: str = None):
         """
@@ -133,7 +135,7 @@ class SparkDataCheck:
         # Column existence check
         if column not in self.df.columns:
             print(f"Error: Column '{column}' not found in DataFrame. Returning DataFrame without modification.")
-            return self.df
+            return self
 
         condition = F.col(column).isNull()
 
@@ -141,8 +143,9 @@ class SparkDataCheck:
         if new_column is None:
             new_column = f"{column}_is_missing"
 
-        return self.df.withColumn(new_column, condition)
-
+        self.df = self.df.withColumn(new_column, condition)
+        return self
+    
     ############################
     #create a couple of summarization methods
     def count_min_max(self, column: str = None, group_by_col: str = None) -> pd.DataFrame:
@@ -191,7 +194,7 @@ class SparkDataCheck:
 
         # No column supplied → all numeric columns
         # This block executes if 'column' was None.
-        num_cols = [f.name for f in self.df.schema.fields if isinstance(f.dataType, numeric_types)and f.name != '_c0']
+        num_cols = [f.name for f in self.df.schema.fields if isinstance(f.dataType, numeric_types)]
         if not num_cols:
             return pd.DataFrame() # if no numeric cols, return empty pandas DataFrame
 
